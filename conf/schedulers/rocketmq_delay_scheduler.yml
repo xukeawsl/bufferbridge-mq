@@ -18,16 +18,27 @@ rocketmq:
 
 # 延时消息调度时间窗口配置，不允许跨天和重叠
 time_windows:
+  # 使用本地限流器（默认）
   - start: "00:30"
     end: "07:30"
+    rate_limiter_type: "local"
     rate_limiter_config: '{"rate": 100}'
     enable: true
 
+  # 使用本地限流器（未指定 type 时默认为 local）
   - start: "13:00"
     end: "14:00"
-    rate_limiter_config: '{"rate": 50}'
+    rate_limiter_config: '{"rate": 50, "burst": 100}'
     enable: true
 
+  # 使用 Redis 限流器（需配置 Redis 连接信息）
+  - start: "18:00"
+    end: "20:00"
+    rate_limiter_type: "redis"
+    rate_limiter_config: '{"bucket_key": "evening_window", "rate": 200, "burst": 300}'
+    enable: true
+
+  # 禁用的窗口
   - start: "23:00"
     end: "23:59"
     rate_limiter_config: '{"rate": 200}'

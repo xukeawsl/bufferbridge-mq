@@ -217,24 +217,32 @@ bool RocketMQDelayScheduler::init(const std::string& config) {
             if (time_window_node["rate_limiter_config"].IsDefined()) {
                 std::string rate_limiter_config =
                     time_window_node["rate_limiter_config"].as<std::string>();
+
+                // 获取限流器类型，默认为 "local"
+                std::string rate_limiter_type = "local";
+                if (time_window_node["rate_limiter_type"].IsDefined()) {
+                    rate_limiter_type =
+                        time_window_node["rate_limiter_type"].as<std::string>();
+                }
+
                 const IRateLimiter* rate_limiter_ext =
-                    RateLimiterExtension()->Find("local");
+                    RateLimiterExtension()->Find(rate_limiter_type.c_str());
                 if (rate_limiter_ext) {
                     auto rate_limiter = rate_limiter_ext->clone();
                     if (rate_limiter->init(rate_limiter_config)) {
                         window.rate_limiter = rate_limiter;
                     } else {
                         SPDLOG_ERROR(
-                            "Failed to initialize rate limiter for time window "
+                            "Failed to initialize rate limiter '{}' for time window "
                             "[{} - {}]",
-                            start_str, end_str);
+                            rate_limiter_type, start_str, end_str);
                         return false;
                     }
                 } else {
                     SPDLOG_ERROR(
-                        "Rate limiter extension 'local' not found for time "
+                        "Rate limiter extension '{}' not found for time "
                         "window [{} - {}]",
-                        start_str, end_str);
+                        rate_limiter_type, start_str, end_str);
                     return false;
                 }
             }

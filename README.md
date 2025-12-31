@@ -164,13 +164,14 @@ rocketmq:
 
 # 时间窗口配置
 time_windows:
-  # 使用本地限流器
+  # 使用本地限流器（显式指定类型）
   - start: "00:30"                                  # 开始时间
     end: "07:30"                                    # 结束时间
-    rate_limiter_config: '{"rate": 100}'            # 本地限流器配置
+    rate_limiter_type: "local"                      # 限流器类型（可选，默认为 local）
+    rate_limiter_config: '{"rate": 100}'            # 限流器配置（JSON 格式）
     enable: true                                    # 是否启用
 
-  # 使用本地限流器，带突发容量
+  # 使用本地限流器（未指定类型，默认为 local）
   - start: "13:00"
     end: "14:00"
     rate_limiter_config: '{"rate": 50, "burst": 100}'
@@ -179,6 +180,7 @@ time_windows:
   # 使用 Redis 限流器
   - start: "18:00"
     end: "20:00"
+    rate_limiter_type: "redis"                      # 指定使用 Redis 限流器
     rate_limiter_config: '{"bucket_key": "evening_window", "rate": 200, "burst": 300}'
     enable: true
 
@@ -188,6 +190,15 @@ time_windows:
     rate_limiter_config: '{"rate": 200}'
     enable: false
 ```
+
+**配置说明**：
+- `rate_limiter_type`（可选）：限流器类型，可选值为 `local` 或 `redis`
+  - 如果不指定，默认为 `local`（本地限流器）
+  - `local`：使用本地内存限流器，适用于单机部署
+  - `redis`：使用 Redis 分布式限流器，适用于多实例部署
+- `rate_limiter_config`（必需）：限流器的具体配置，JSON 格式字符串
+  - 不同类型的限流器需要不同的配置参数（详见下方说明）
+- `enable`（必需）：是否启用该时间窗口
 
 ### 限流器配置
 
