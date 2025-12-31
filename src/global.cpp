@@ -6,6 +6,7 @@
 
 struct GlobalExtensions {
     LocalRateLimiter local_rate_limiter;
+    RedisRateLimiter redis_rate_limiter;
 
     RocketMQDelayScheduler rocketmq_delay_scheduler;
 };
@@ -15,6 +16,9 @@ static GlobalExtensions g_global_extensions;
 void register_global_extensions() {
     RateLimiterExtension()->RegisterOrDie(
         "local", &g_global_extensions.local_rate_limiter);
+
+    RateLimiterExtension()->RegisterOrDie(
+        "redis", &g_global_extensions.redis_rate_limiter);
 
     SchedulerExtension()->RegisterOrDie(
         "rocketmq_delay_scheduler",

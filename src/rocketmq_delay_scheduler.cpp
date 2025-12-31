@@ -230,6 +230,12 @@ bool RocketMQDelayScheduler::init(const std::string& config) {
                             start_str, end_str);
                         return false;
                     }
+                } else {
+                    SPDLOG_ERROR(
+                        "Rate limiter extension 'local' not found for time "
+                        "window [{} - {}]",
+                        start_str, end_str);
+                    return false;
                 }
             }
 

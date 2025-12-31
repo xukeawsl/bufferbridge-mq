@@ -6,10 +6,9 @@ option(LINK_SO "Whether examples are linked dynamically" OFF)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(BUILD_SHARED_LIBS OFF)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-add_compile_options(-Wno-deprecated-declarations -g -O0)
+add_compile_options(-Wno-deprecated-declarations)
 
 list(APPEND CMAKE_PREFIX_PATH /usr/local/3rd/protobuf-3.19.4)
 list(APPEND CMAKE_PREFIX_PATH /usr/local/3rd/openssl-1.1.1q)

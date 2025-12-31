@@ -462,13 +462,44 @@ public:
 **实现步骤**：
 1. 继承 `IRateLimiter` 接口
 2. 实现上述三个核心方法
-3. 在 `global.cpp` 中通过 `RateLimiterExtension()->Register()` 注册实现
+3. 在 `global.cpp` 中创建全局实例并注册
 
 **示例**：
 ```cpp
-// 在 global.cpp 中注册
-RateLimiterExtension()->Register<MyRateLimiter>("my_limiter");
+// 在 global.cpp 中添加实例和注册代码
+
+// 1. 在 GlobalExtensions 结构体中添加实例
+struct GlobalExtensions {
+    LocalRateLimiter local_rate_limiter;
+    RedisRateLimiter redis_rate_limiter;
+    MyRateLimiter my_rate_limiter;  // 添加自定义限流器实例
+
+    RocketMQDelayScheduler rocketmq_delay_scheduler;
+};
+
+// 2. 在 register_global_extensions() 函数中注册
+void register_global_extensions() {
+    RateLimiterExtension()->RegisterOrDie(
+        "local", &g_global_extensions.local_rate_limiter);
+
+    RateLimiterExtension()->RegisterOrDie(
+        "redis", &g_global_extensions.redis_rate_limiter);
+
+    // 注册自定义限流器
+    RateLimiterExtension()->RegisterOrDie(
+        "my_limiter", &g_global_extensions.my_rate_limiter);
+
+    SchedulerExtension()->RegisterOrDie(
+        "rocketmq_delay_scheduler",
+        &g_global_extensions.rocketmq_delay_scheduler);
+}
 ```
+
+**说明**：
+- `RegisterOrDie()` 是 brpc 扩展注册方法，如果注册失败会直接终止程序
+- 第一个参数是扩展名称（用于配置文件中的 `type` 字段）
+- 第二个参数是扩展实例的指针
+- 扩展实例必须是全局的或静态的，以保证生命周期正确
 
 ### 添加新的调度器
 
@@ -497,13 +528,45 @@ public:
 **实现步骤**：
 1. 继承 `IScheduler` 接口
 2. 实现上述四个核心方法
-3. 在 `global.cpp` 中通过 `SchedulerExtension()->Register()` 注册实现
+3. 在 `global.cpp` 中创建全局实例并注册
 
 **示例**：
 ```cpp
-// 在 global.cpp 中注册
-SchedulerExtension()->Register<MyScheduler>("my_scheduler");
+// 在 global.cpp 中添加实例和注册代码
+
+// 1. 在 GlobalExtensions 结构体中添加实例
+struct GlobalExtensions {
+    LocalRateLimiter local_rate_limiter;
+    RedisRateLimiter redis_rate_limiter;
+
+    RocketMQDelayScheduler rocketmq_delay_scheduler;
+    MyScheduler my_scheduler;  // 添加自定义调度器实例
+};
+
+// 2. 在 register_global_extensions() 函数中注册
+void register_global_extensions() {
+    RateLimiterExtension()->RegisterOrDie(
+        "local", &g_global_extensions.local_rate_limiter);
+
+    RateLimiterExtension()->RegisterOrDie(
+        "redis", &g_global_extensions.redis_rate_limiter);
+
+    SchedulerExtension()->RegisterOrDie(
+        "rocketmq_delay_scheduler",
+        &g_global_extensions.rocketmq_delay_scheduler);
+
+    // 注册自定义调度器
+    SchedulerExtension()->RegisterOrDie(
+        "my_scheduler", &g_global_extensions.my_scheduler);
+}
 ```
+
+**说明**：
+- `RegisterOrDie()` 是 brpc 扩展注册方法，如果注册失败会直接终止程序
+- 第一个参数是扩展名称（用于配置文件中的 `type` 字段）
+- 第二个参数是扩展实例的指针
+- 扩展实例必须是全局的或静态的，以保证生命周期正确
+- 注册后可在配置文件中通过名称引用此扩展
 
 ## 许可证
 
