@@ -1,0 +1,34 @@
+# 调度器工作线程数
+worker_threads: 4
+
+# 调度器调度间隔时间，单位秒
+scheduler_interval_seconds: 10
+
+# 配置 rocketmq 订阅的缓冲 topic 和目标 topic
+rocketmq:
+  buffer_consumer_topic: "BUFFER_TOPIC"
+  buffer_consumer_access_point: "127.0.0.1:8081"
+  buffer_consumer_group: "BUFFER_GROUP"
+  buffer_consumer_await_duration: 5
+  buffer_consumer_batch_size: 32
+  buffer_consumer_invisible_duration: 20
+
+  target_producer_topic: "TARGET_TOPIC"
+  target_producer_access_point: "127.0.0.1:8081"
+
+# 延时消息调度时间窗口配置，不允许跨天和重叠
+time_windows:
+  - start: "00:30"
+    end: "07:30"
+    rate_limiter_config: '{"rate": 100}'
+    enable: true
+
+  - start: "13:00"
+    end: "14:00"
+    rate_limiter_config: '{"rate": 50}'
+    enable: true
+
+  - start: "23:00"
+    end: "23:59"
+    rate_limiter_config: '{"rate": 200}'
+    enable: false
