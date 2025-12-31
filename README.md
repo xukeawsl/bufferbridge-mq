@@ -75,18 +75,18 @@ BufferBridge MQ 是一个消息调度中间件，主要用于以下场景：
 
 ### 编译环境
 - **CMake**: >= 3.16
-- **编译器**: 支持 C++17 的 GCC/Clang
-- **操作系统**: Linux (推荐 CentOS 7+ 或 Ubuntu 18.04+)
+- **编译器**: 支持 C++17 的 GCC
+- **操作系统**: Linux (推荐 CentOS 7+ 或 Ubuntu 22.04+)
 
 ### 依赖库
 
 #### 核心依赖
-- [RocketMQ C++ Client](https://github.com/apache/rocketmq-client-cpp) v5.0.3
+- [RocketMQ C++ Client](https://github.com/xukeawsl/rocketmq-client-cpp-5.0.3) v5.0.3
 - [brpc](https://github.com/apache/brpc) v1.15.0
 - [yaml-cpp](https://github.com/jbeder/yaml-cpp) v0.8.0
 - [LevelDB](https://github.com/google/leveldb)
-- [OpenSSL](https://www.openssl.org/) 1.1.1+
-- [Protocol Buffers](https://github.com/protocolbuffers/protobuf) 3.19.4+
+- [OpenSSL](https://www.openssl.org/) 1.1.1q
+- [Protocol Buffers](https://github.com/protocolbuffers/protobuf) 3.19.4
 - [nlohmann/json](https://github.com/nlohmann/json) v3.12.0
 
 #### 系统依赖
@@ -104,7 +104,7 @@ BufferBridge MQ 是一个消息调度中间件，主要用于以下场景：
 
 ```bash
 # 安装基础工具
-sudo yum install -y git cmake gcc-c++
+sudo apt install -y git cmake gcc g++
 
 # 安装第三方依赖到指定目录
 # 假设安装到 /usr/local/3rd/
