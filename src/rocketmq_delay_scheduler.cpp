@@ -60,6 +60,9 @@ RocketMQDelayScheduler::RocketMQDelayScheduler() : _running(false) {}
 RocketMQDelayScheduler::~RocketMQDelayScheduler() { stop(); }
 
 bool RocketMQDelayScheduler::init(const std::string& config) {
+    // 保存配置文件路径用于热加载
+    _config_file = config;
+
     try {
         YAML::Node config_node = YAML::LoadFile(config);
 
@@ -188,10 +191,10 @@ bool RocketMQDelayScheduler::init(const std::string& config) {
                 .withAwaitDuration(
                     std::chrono::seconds(cfg.buffer_consumer_await_duration))
                 .build();
-
+        
         cfg.buffer_mq_consumer =
             std::make_shared<rocketmq::SimpleConsumer>(std::move(consumer));
-
+        
         auto producer =
             rocketmq::Producer::newBuilder()
                 .withConfiguration(
@@ -201,10 +204,10 @@ bool RocketMQDelayScheduler::init(const std::string& config) {
                         .build())
                 .withTopics({cfg.target_producer_topic})
                 .build();
-
+        
         cfg.target_mq_producer =
             std::make_shared<rocketmq::Producer>(std::move(producer));
-
+        
         YAML::Node time_windows_node = config_node["time_windows"];
 
         for (const auto& time_window_node : time_windows_node) {
@@ -252,7 +255,7 @@ bool RocketMQDelayScheduler::init(const std::string& config) {
         }
 
         validate_time_windows(cfg.time_windows);
-
+        
         _cfg.Modify(modify, cfg);
     } catch (const std::exception& e) {
         SPDLOG_ERROR("Failed to initialize RocketMQDelayScheduler: {}",
@@ -281,6 +284,9 @@ void RocketMQDelayScheduler::start() {
         _worker_threads.emplace_back(
             &RocketMQDelayScheduler::worker_thread_func, this);
     }
+
+    // 启动工作线程后再启用配置热加载
+    enable_hot_reload();
 }
 
 void RocketMQDelayScheduler::stop() {
@@ -289,6 +295,10 @@ void RocketMQDelayScheduler::stop() {
     }
 
     _running = false;
+
+    // 注销热加载任务
+    HotLoader::instance().unregister_task(_hot_load_task.get());
+    _hot_load_task.reset();
 
     for (auto& thread : _worker_threads) {
         if (thread.joinable()) {
@@ -299,20 +309,27 @@ void RocketMQDelayScheduler::stop() {
 
 void RocketMQDelayScheduler::worker_thread_func() {
     while (_running) {
-        butil::DoublyBufferedData<RocketMQDelaySchedulerConfig>::ScopedPtr
-            cfg_ptr;
-        if (_cfg.Read(&cfg_ptr)) {
-            SPDLOG_ERROR(
-                "Failed to read configuration for RocketMQDelayScheduler");
-            std::this_thread::sleep_for(std::chrono::seconds(1));
-            continue;
-        }
+        // 快速读取配置并复制到本地变量
+        RocketMQDelaySchedulerConfig local_cfg;
+
+        {
+            butil::DoublyBufferedData<RocketMQDelaySchedulerConfig>::ScopedPtr cfg_ptr;
+            if (_cfg.Read(&cfg_ptr)) {
+                SPDLOG_ERROR(
+                    "Failed to read configuration for RocketMQDelayScheduler");
+                std::this_thread::sleep_for(std::chrono::seconds(1));
+                continue;
+            }
+
+            // 立即复制配置到本地，最小化持有读锁的时间
+            local_cfg = *cfg_ptr;
+        }  // ScopedPtr 在这里析构，立即释放读锁
 
         short current_time = get_current_time();
 
         bool hit_flag = false;
-        std::shared_ptr<IRateLimiter> current_rate_limiter = nullptr;
-        for (const auto& window : cfg_ptr->time_windows) {
+        std::shared_ptr<IRateLimiter> current_rate_limiter;
+        for (const auto& window : local_cfg.time_windows) {
             if (window.enable && current_time >= window.start &&
                 current_time <= window.end) {
                 hit_flag = true;
@@ -323,7 +340,7 @@ void RocketMQDelayScheduler::worker_thread_func() {
 
         if (!hit_flag) {
             std::this_thread::sleep_for(
-                std::chrono::seconds(cfg_ptr->scheduler_interval_seconds));
+                std::chrono::seconds(local_cfg.scheduler_interval_seconds));
             continue;
         }
 
@@ -336,28 +353,28 @@ void RocketMQDelayScheduler::worker_thread_func() {
 
         std::vector<rocketmq::MessageConstSharedPtr> messages;
         std::error_code ec;
-        cfg_ptr->buffer_mq_consumer->receive(
-            cfg_ptr->buffer_consumer_batch_size,
-            std::chrono::seconds(cfg_ptr->buffer_consumer_invisible_duration),
+        local_cfg.buffer_mq_consumer->receive(
+            local_cfg.buffer_consumer_batch_size,
+            std::chrono::seconds(local_cfg.buffer_consumer_invisible_duration),
             ec, messages);
 
         if (ec) {
             SPDLOG_ERROR("Failed to receive messages from buffer MQ: {}",
                          ec.message());
             std::this_thread::sleep_for(
-                std::chrono::seconds(cfg_ptr->scheduler_interval_seconds));
+                std::chrono::seconds(local_cfg.scheduler_interval_seconds));
             continue;
         }
 
         if (messages.empty()) {
             std::this_thread::sleep_for(
-                std::chrono::seconds(cfg_ptr->scheduler_interval_seconds));
+                std::chrono::seconds(local_cfg.scheduler_interval_seconds));
             continue;
         }
 
         for (const auto& message : messages) {
             auto new_message = rocketmq::Message::newBuilder()
-                                   .withTopic(cfg_ptr->target_producer_topic)
+                                   .withTopic(local_cfg.target_producer_topic)
                                    .withTag(message->tag())
                                    .withKeys(message->keys())
                                    .withBody(message->body())
@@ -365,7 +382,7 @@ void RocketMQDelayScheduler::worker_thread_func() {
 
             std::error_code send_ec;
             rocketmq::SendReceipt send_receipt =
-                cfg_ptr->target_mq_producer->send(std::move(new_message),
+                local_cfg.target_mq_producer->send(std::move(new_message),
                                                   send_ec);
 
             if (send_ec) {
@@ -375,12 +392,12 @@ void RocketMQDelayScheduler::worker_thread_func() {
             } else {
                 SPDLOG_INFO(
                     "Successfully sent message to topic {}. Message ID: {}",
-                    cfg_ptr->target_producer_topic, send_receipt.message_id);
+                    local_cfg.target_producer_topic, send_receipt.message_id);
             }
 
             std::string receipt_handle = message->extension().receipt_handle;
             std::error_code ack_ec;
-            cfg_ptr->buffer_mq_consumer->ack(*message, ack_ec);
+            local_cfg.buffer_mq_consumer->ack(*message, ack_ec);
             if (ack_ec) {
                 SPDLOG_ERROR("Failed to ack message in buffer MQ: {}",
                              ack_ec.message());
@@ -389,4 +406,47 @@ void RocketMQDelayScheduler::worker_thread_func() {
 
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
     }
+}
+
+void RocketMQDelayScheduler::reload_config() {
+    SPDLOG_INFO("Reloading configuration from: {}", _config_file);
+
+    if (_config_file.empty()) {
+        SPDLOG_ERROR("Config file path is empty, cannot reload");
+        return;
+    }
+
+    // 复用 init 方法重新加载配置
+    // 由于 init 使用 _cfg.Modify() 更新配置，是线程安全的
+    if (init(_config_file)) {
+        SPDLOG_INFO("Configuration reloaded successfully");
+    } else {
+        SPDLOG_INFO("Failed to reload configuration");
+    }
+}
+
+void RocketMQDelayScheduler::enable_hot_reload() {
+    if (_config_file.empty()) {
+        SPDLOG_ERROR("Config file path is empty, cannot enable hot reload");
+        return;
+    }
+
+    if (_hot_load_task) {
+        SPDLOG_WARN("Hot reload is already enabled");
+        return;
+    }
+
+    // 创建热加载任务
+    _hot_load_task = std::make_unique<RocketMQDelaySchedulerHotLoadTask>(
+        this, _config_file);
+
+    // 注册到 HotLoader
+    if (HotLoader::instance().register_task(_hot_load_task.get(),
+                                             HotLoader::DOESNT_OWN_TASK) != 0) {
+        SPDLOG_ERROR("Failed to register hot load task");
+        _hot_load_task.reset();
+        return;
+    }
+
+    SPDLOG_INFO("Hot reload enabled for config file: {}", _config_file);
 }

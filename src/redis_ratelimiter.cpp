@@ -155,9 +155,17 @@ bool RedisRateLimiter::is_allowed() {
         FLAGS_limiter_check_timeout_ms);    // 100 ms timeout for each
                                             // is_allowed check
 
-    request.AddCommand("EVALSHA %s 1 %s %lf %lf %lld", _lua_script_sha1.c_str(),
-                       _bucket_key.c_str(), _tokens_per_second, _capacity,
-                       butil::gettimeofday_ms());
+    // 使用 AddCommandByComponents 避免格式化问题
+    std::vector<butil::StringPiece> components;
+    components.emplace_back("EVALSHA");
+    components.emplace_back(_lua_script_sha1);
+    components.emplace_back("1");
+    components.emplace_back(_bucket_key);
+    components.emplace_back(std::to_string(_tokens_per_second));
+    components.emplace_back(std::to_string(_capacity));
+    components.emplace_back(std::to_string(butil::gettimeofday_ms()));
+
+    request.AddCommandByComponents(components.data(), components.size());
 
     _redis_channel.CallMethod(nullptr, &cntl, &request, &response, nullptr);
 

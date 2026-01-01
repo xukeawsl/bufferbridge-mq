@@ -1,8 +1,10 @@
 #pragma once
 
 #include <memory>
+#include <string>
 
 #include "butil/containers/doubly_buffered_data.h"
+#include "hot_loader.h"
 #include "iratelimiter.h"
 #include "ischeduler.h"
 #include "rocketmq/ErrorCode.h"
@@ -10,6 +12,9 @@
 #include "rocketmq/Message.h"
 #include "rocketmq/Producer.h"
 #include "rocketmq/SimpleConsumer.h"
+
+// 前置声明
+class RocketMQDelaySchedulerHotLoadTask;
 
 struct RocketMQDelaySchedulerConfig {
     std::size_t worker_threads{std::thread::hardware_concurrency()};
@@ -55,8 +60,13 @@ public:
             std::make_shared<RocketMQDelayScheduler>());
     }
 
+    // 重新加载配置（线程安全）
+    void reload_config();
+
 private:
     void worker_thread_func();
+
+    void enable_hot_reload();
 
     static bool modify(RocketMQDelaySchedulerConfig& bg_cfg,
                        const RocketMQDelaySchedulerConfig& new_cfg) {
@@ -68,4 +78,22 @@ private:
     std::atomic<bool> _running;
     std::vector<std::thread> _worker_threads;
     butil::DoublyBufferedData<RocketMQDelaySchedulerConfig> _cfg;
+    std::string _config_file;  // 配置文件路径，用于热加载
+    std::unique_ptr<RocketMQDelaySchedulerHotLoadTask> _hot_load_task;  // 热加载任务
+};
+
+// 热加载任务类
+class RocketMQDelaySchedulerHotLoadTask : public HotLoadTask {
+public:
+    RocketMQDelaySchedulerHotLoadTask(RocketMQDelayScheduler* scheduler,
+                                     const std::string& file)
+        : HotLoadTask(file), _scheduler(scheduler) {}
+
+    void on_reload() override {
+        SPDLOG_INFO("Hot reload triggered for config file: {}", watch_file());
+        _scheduler->reload_config();
+    }
+
+private:
+    RocketMQDelayScheduler* _scheduler;
 };
