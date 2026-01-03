@@ -1,5 +1,14 @@
 #pragma once
 
 #include "brpc/extension.h"
+#include "gflags/gflags.h"
+#include "spdlog/async.h"
+#include "spdlog/sinks/basic_file_sink.h"
+#include "spdlog/sinks/rotating_file_sink.h"
+#include "spdlog/sinks/stdout_color_sinks.h"
+#include "spdlog/spdlog.h"
+#include "rocketmq/Logger.h"
 
-void register_global_extensions();
+bool global_init();
+
+void global_destroy();

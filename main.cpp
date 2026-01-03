@@ -5,25 +5,15 @@
 #include "rocketmq_delay_scheduler.h"
 
 int main(int argc, char* argv[]) {
-
-    register_global_extensions();
-
-    // 初始化 HotLoader
-    if (HotLoader::instance().init() != 0) {
-        SPDLOG_ERROR("Failed to initialize HotLoader");
-        return 1;
-    }
-
-    // 启动 HotLoader
-    if (HotLoader::instance().run() != 0) {
-        SPDLOG_ERROR("Failed to start HotLoader");
+    if (!global_init()) {
+        SPDLOG_ERROR("Global initialization failed");
         return 1;
     }
 
     RocketMQDelayScheduler scheduler;
     if (!scheduler.init("../conf/schedulers/rocketmq_delay_scheduler.yml")) {
         SPDLOG_ERROR("Failed to initialize scheduler");
-        HotLoader::instance().stop();
+        global_destroy();
         return 1;
     }
 
@@ -37,8 +27,7 @@ int main(int argc, char* argv[]) {
 
     scheduler.stop();
 
-    // 停止 HotLoader
-    HotLoader::instance().stop();
+    global_destroy();
 
     return 0;
 }
