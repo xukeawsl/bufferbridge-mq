@@ -8,6 +8,8 @@
 #include <unordered_map>
 #include <filesystem>
 #include <functional>
+#include <algorithm>
+#include <vector>
 
 #include <unistd.h>
 #include <sys/epoll.h>
@@ -122,23 +124,35 @@ public:
         }
 
         std::lock_guard<std::mutex> lock(_mutex); // Ensure thread safety
-        
+
         const std::string& file = task->watch_file();
-        if (_tasks.find(file) != _tasks.end()) {
-            return -3; // Task already registered
+
+        // Check if this exact task is already registered
+        auto& task_list = _tasks[file];
+        for (const auto& task_info : task_list) {
+            if (task_info.task == task) {
+                return -3; // Task already registered
+            }
         }
 
-        // Register the file with inotify
-        int wd = inotify_add_watch(_inotify_fd, file.c_str(), kWatchEventMask);
-        if (wd < 0) {
-            return -4; // Failed to add watch
+        // Register the file with inotify if not already watching
+        int wd = -1;
+        if (!task_list.empty()) {
+            // File is already being watched, reuse the watch descriptor
+            wd = task_list[0].task->watch_descriptor();
+        } else {
+            // Need to create a new watch
+            wd = inotify_add_watch(_inotify_fd, file.c_str(), kWatchEventMask);
+            if (wd < 0) {
+                return -4; // Failed to add watch
+            }
         }
 
         task->set_watch_descriptor(wd); // Set the watch descriptor in the task
 
-        _tasks[file] = task;
-        _ownerships[file] = ownership;
-        _watch_descriptors[wd] = task;
+        // Add the task to the list
+        task_list.emplace_back(task, ownership);
+        _watch_descriptors[wd] = file;
 
         return 0; // Success
     }
@@ -147,7 +161,47 @@ public:
         if (!task) {
             return -1; // Invalid task pointer
         }
-        return unregister_task(task->watch_file());
+
+        if (!_initialized.load()) {
+            return -2; // HotLoader not initialized
+        }
+
+        std::lock_guard<std::mutex> lock(_mutex); // Ensure thread safety
+
+        const std::string& file = task->watch_file();
+        auto it = _tasks.find(file);
+        if (it == _tasks.end() || it->second.empty()) {
+            return -4; // Task not found
+        }
+
+        auto& task_list = it->second;
+
+        // Find and remove the specific task
+        auto task_it = std::find_if(task_list.begin(), task_list.end(),
+            [task](const TaskInfo& info) { return info.task == task; });
+
+        if (task_it == task_list.end()) {
+            return -4; // Task not found
+        }
+
+        // Delete the task if HotLoader owns it
+        if (task_it->ownership == OWN_TASK) {
+            delete task;
+        }
+
+        // Remove this task from the list
+        task_list.erase(task_it);
+
+        // If no more tasks for this file, remove the inotify watch
+        if (task_list.empty()) {
+            if (task->watch_descriptor() >= 0) {
+                inotify_rm_watch(_inotify_fd, task->watch_descriptor());
+                _watch_descriptors.erase(task->watch_descriptor());
+            }
+            _tasks.erase(it);
+        }
+
+        return 0; // Success
     }
 
     int unregister_task(const std::string& file) {
@@ -163,26 +217,30 @@ public:
         std::lock_guard<std::mutex> lock(_mutex); // Ensure thread safety
 
         auto it = _tasks.find(normalize_file);
-        if (it == _tasks.end()) {
+        if (it == _tasks.end() || it->second.empty()) {
             return -4; // Task not found
         }
 
-        HotLoadTask* task = it->second;
+        auto& task_list = it->second;
+
+        // Remove all tasks for this file
+        for (const auto& task_info : task_list) {
+            HotLoadTask* task = task_info.task;
+            task->set_watch_descriptor(-1); // Reset the watch descriptor
+
+            if (task_info.ownership == OWN_TASK) {
+                delete task; // Delete the task if HotLoader owns it
+            }
+        }
+
+        // Remove the inotify watch
+        if (!task_list.empty() && task_list[0].task->watch_descriptor() >= 0) {
+            int wd = task_list[0].task->watch_descriptor();
+            inotify_rm_watch(_inotify_fd, wd);
+            _watch_descriptors.erase(wd);
+        }
+
         _tasks.erase(it);
-
-        if (task->watch_descriptor() >= 0) {
-            // Remove the watch from inotify
-            inotify_rm_watch(_inotify_fd, task->watch_descriptor());
-            _watch_descriptors.erase(task->watch_descriptor());
-        }
-
-        task->set_watch_descriptor(-1); // Reset the watch descriptor
-
-        if (_ownerships[normalize_file] == OWN_TASK) {
-            delete task; // Delete the task if HotLoader owns it
-        }
-
-        _ownerships.erase(normalize_file); // Remove ownership information
 
         return 0; // Success
     }
@@ -194,19 +252,21 @@ public:
 
         std::lock_guard<std::mutex> lock(_mutex); // Ensure thread safety
 
-        for (auto& [file, task] : _tasks) {
-            if (task->watch_descriptor() >= 0) {
-                inotify_rm_watch(_inotify_fd, task->watch_descriptor());
-                _watch_descriptors.erase(task->watch_descriptor());
-            }
+        for (auto& [file, task_list] : _tasks) {
+            for (const auto& task_info : task_list) {
+                HotLoadTask* task = task_info.task;
+                if (task->watch_descriptor() >= 0) {
+                    inotify_rm_watch(_inotify_fd, task->watch_descriptor());
+                    _watch_descriptors.erase(task->watch_descriptor());
+                }
 
-            if (_ownerships[file] == OWN_TASK) {
-                delete task; // Delete the task if HotLoader owns it
+                if (task_info.ownership == OWN_TASK) {
+                    delete task; // Delete the task if HotLoader owns it
+                }
             }
         }
 
         _tasks.clear();
-        _ownerships.clear();
         _watch_descriptors.clear();
 
         return 0; // Success
@@ -317,12 +377,18 @@ private:
             for (const auto& [wd, mask] : event_masks) {
                 auto it = _watch_descriptors.find(wd);
                 if (it != _watch_descriptors.end()) {
-                    HotLoadTask* task = it->second;
+                    const std::string& file = it->second;
+                    auto task_it = _tasks.find(file);
+                    if (task_it != _tasks.end()) {
+                        for (const auto& task_info : task_it->second) {
+                            HotLoadTask* task = task_info.task;
 
-                    if (mask & IN_IGNORED) {
-                        rewatch_task(task);
-                    } else {
-                        task->on_reload();
+                            if (mask & IN_IGNORED) {
+                                rewatch_task(task);
+                            } else {
+                                task->on_reload();
+                            }
+                        }
                     }
                 }
             }
@@ -332,18 +398,24 @@ private:
     void restart_stopped_tasks() {
         std::lock_guard<std::mutex> lock(_mutex); // Ensure thread safety
 
-        for (auto& [_, task] : _tasks) {
-            if (task->watch_descriptor() < 0 &&
-                std::filesystem::exists(task->watch_file())) {
-                
-                // Task is stopped, try to restart it
-                int wd = inotify_add_watch(_inotify_fd, task->watch_file().c_str(), 
+        for (auto& [file, task_list] : _tasks) {
+            if (task_list.empty()) {
+                continue;
+            }
+
+            // Check if any task needs restart
+            if (task_list[0].task->watch_descriptor() < 0 &&
+                std::filesystem::exists(file)) {
+
+                // Tasks are stopped, try to restart them
+                int wd = inotify_add_watch(_inotify_fd, file.c_str(),
                                         kWatchEventMask);
                 if (wd >= 0) {
-                    task->on_reload();
-
-                    task->set_watch_descriptor(wd);
-                    _watch_descriptors[wd] = task;
+                    for (const auto& task_info : task_list) {
+                        task_info.task->on_reload();
+                        task_info.task->set_watch_descriptor(wd);
+                    }
+                    _watch_descriptors[wd] = file;
                 }
             }
         }
@@ -354,32 +426,59 @@ private:
             return;
         }
 
-        if (task->watch_descriptor() >= 0) {
-            inotify_rm_watch(_inotify_fd, task->watch_descriptor());
-        }
+        const std::string& file = task->watch_file();
 
-        if (!std::filesystem::exists(task->watch_file())) {
-            task->set_watch_descriptor(-1); // Reset if file does not exist
+        // Find all tasks for this file
+        auto it = _tasks.find(file);
+        if (it == _tasks.end() || it->second.empty()) {
             return;
         }
 
-        int wd = inotify_add_watch(_inotify_fd, task->watch_file().c_str(), 
+        auto& task_list = it->second;
+
+        // Remove old watch
+        if (task_list[0].task->watch_descriptor() >= 0) {
+            inotify_rm_watch(_inotify_fd, task_list[0].task->watch_descriptor());
+            _watch_descriptors.erase(task_list[0].task->watch_descriptor());
+        }
+
+        if (!std::filesystem::exists(file)) {
+            // Reset all watch descriptors if file does not exist
+            for (const auto& task_info : task_list) {
+                task_info.task->set_watch_descriptor(-1);
+            }
+            return;
+        }
+
+        // Add new watch
+        int wd = inotify_add_watch(_inotify_fd, file.c_str(),
                                 kWatchEventMask);
         if (wd >= 0) {
-            task->on_reload();
-
-            task->set_watch_descriptor(wd);
-            _watch_descriptors[wd] = task;
+            for (const auto& task_info : task_list) {
+                task_info.task->on_reload();
+                task_info.task->set_watch_descriptor(wd);
+            }
+            _watch_descriptors[wd] = file;
         } else {
-            task->set_watch_descriptor(-1); // Reset if rewatch fails
+            // Reset all watch descriptors if rewatch fails
+            for (const auto& task_info : task_list) {
+                task_info.task->set_watch_descriptor(-1);
+            }
         }
     }
 
 private:
+    struct TaskInfo {
+        HotLoadTask* task;
+        OwnerShip ownership;
+
+        TaskInfo(HotLoadTask* t, OwnerShip o) : task(t), ownership(o) {}
+        TaskInfo() : task(nullptr), ownership(DOESNT_OWN_TASK) {}
+    };
+
     std::mutex _mutex; // Mutex to protect access to shared resources
-    std::unordered_map<std::string, HotLoadTask*> _tasks; // Maps file paths to HotLoadTask pointers
-    std::unordered_map<std::string, OwnerShip> _ownerships; // Maps file paths to ownership status
-    std::unordered_map<int, HotLoadTask*> _watch_descriptors; // Maps inotify watch descriptors to HotLoadTask pointers
+    std::unordered_map<std::string, std::vector<TaskInfo>> _tasks; // Maps file paths to multiple HotLoadTask pointers
+    std::unordered_map<int, std::string> _watch_descriptors; // Maps inotify watch descriptors to file paths
     int _inotify_fd = -1; // File descriptor for inotify
     int _epoll_fd = -1;   // File descriptor for epoll
     std::atomic<bool> _initialized = false; // Flag to indicate if HotLoader is initialized
