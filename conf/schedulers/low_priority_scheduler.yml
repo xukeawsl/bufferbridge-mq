@@ -1,0 +1,32 @@
+# 低优先级调度器配置（延迟队列）
+worker_threads: 2
+
+scheduler_interval_seconds: 10
+
+rocketmq:
+  buffer_consumer_topic: "LOW_PRIORITY_BUFFER"
+  buffer_consumer_access_point: "127.0.0.1:8081"
+  buffer_consumer_group: "LOW_PRIORITY_GROUP"
+  buffer_consumer_await_duration: 5
+  buffer_consumer_batch_size: 32
+  buffer_consumer_invisible_duration: 20
+
+  target_producer_topic: "LOW_PRIORITY_TARGET"
+  target_producer_access_point: "127.0.0.1:8081"
+
+time_windows:
+  # 夜间处理窗口（使用 Redis 限流器）
+  - id: 1
+    start: "00:00"
+    end: "06:00"
+    rate_limiter_type: "redis"
+    rate_limiter_config: '{"rate": 100, "burst": 200}'
+    enable: true
+
+  # 午间处理窗口
+  - id: 2
+    start: "12:00"
+    end: "15:00"
+    rate_limiter_type: "redis"
+    rate_limiter_config: '{"rate": 50}'
+    enable: true

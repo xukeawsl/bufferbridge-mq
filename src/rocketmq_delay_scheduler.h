@@ -34,8 +34,9 @@ struct RocketMQDelaySchedulerConfig {
     std::shared_ptr<rocketmq::Producer> target_mq_producer;
 
     struct TimeWindow {
-        short start;    // "05:30" -> 530
-        short end;      // "09:30" -> 930
+        std::string id;    // 时间窗口唯一标识
+        short start;       // "05:30" -> 530
+        short end;         // "09:30" -> 930
         std::shared_ptr<IRateLimiter> rate_limiter;
         bool enable;
     };
@@ -49,7 +50,7 @@ public:
 
     ~RocketMQDelayScheduler();
 
-    bool init(const std::string& config) override;
+    bool init(const std::string& name, const std::string& config) override;
 
     void start() override;
 
@@ -78,15 +79,17 @@ private:
     std::atomic<bool> _running;
     std::vector<std::thread> _worker_threads;
     butil::DoublyBufferedData<RocketMQDelaySchedulerConfig> _cfg;
-    std::string _config_file;  // 配置文件路径，用于热加载
-    std::unique_ptr<RocketMQDelaySchedulerHotLoadTask> _hot_load_task;  // 热加载任务
+    std::string _name;    // 调度器名称，用于生成唯一的限流器 key
+    std::string _config_file;    // 配置文件路径，用于热加载
+    std::unique_ptr<RocketMQDelaySchedulerHotLoadTask>
+        _hot_load_task;    // 热加载任务
 };
 
 // 热加载任务类
 class RocketMQDelaySchedulerHotLoadTask : public HotLoadTask {
 public:
     RocketMQDelaySchedulerHotLoadTask(RocketMQDelayScheduler* scheduler,
-                                     const std::string& file)
+                                      const std::string& file)
         : HotLoadTask(file), _scheduler(scheduler) {}
 
     void on_reload() override {

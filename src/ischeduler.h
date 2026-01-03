@@ -9,7 +9,7 @@ class IScheduler {
 public:
     virtual ~IScheduler() noexcept = default;
 
-    virtual bool init(const std::string& config) = 0;
+    virtual bool init(const std::string& name, const std::string& config) = 0;
 
     virtual void start() = 0;
 

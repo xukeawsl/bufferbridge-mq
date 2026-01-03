@@ -1,0 +1,24 @@
+# 高优先级调度器配置
+worker_threads: 4
+
+scheduler_interval_seconds: 10
+
+rocketmq:
+  buffer_consumer_topic: "HIGH_PRIORITY_BUFFER"
+  buffer_consumer_access_point: "127.0.0.1:8081"
+  buffer_consumer_group: "HIGH_PRIORITY_GROUP"
+  buffer_consumer_await_duration: 5
+  buffer_consumer_batch_size: 32
+  buffer_consumer_invisible_duration: 20
+
+  target_producer_topic: "HIGH_PRIORITY_TARGET"
+  target_producer_access_point: "127.0.0.1:8081"
+
+time_windows:
+  # 全天时间窗口
+  - id: 1
+    start: "00:00"
+    end: "23:59"
+    rate_limiter_type: "local"
+    rate_limiter_config: '{"rate": 1000}'
+    enable: true

@@ -1,0 +1,21 @@
+# BufferBridge MQ 主配置文件
+
+# 调度器列表
+schedulers:
+  # 高优先级调度器
+  - name: "high_priority_scheduler"
+    enabled: true
+    type: "rocketmq_delay_scheduler"
+    config_file: "../conf/schedulers/high_priority_scheduler.yml"
+
+  # 低优先级调度器（延迟队列）
+  - name: "low_priority_scheduler"
+    enabled: true
+    type: "rocketmq_delay_scheduler"
+    config_file: "../conf/schedulers/low_priority_scheduler.yml"
+
+  # 重试调度器（可选）
+  # - name: "retry_scheduler"
+  #   enabled: false
+  #   type: "rocketmq_delay_scheduler"
+  #   config_file: "../conf/schedulers/retry_scheduler.yml"

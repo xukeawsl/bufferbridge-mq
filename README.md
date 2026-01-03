@@ -144,7 +144,38 @@ make clang-format
 
 ### 主配置文件
 
-配置文件位置：`conf/schedulers/rocketmq_delay_scheduler.yml`
+配置文件位置：`conf/conf.yml`
+
+主配置文件用于定义多个调度器实例，支持同时运行多个调度器。
+
+```yaml
+# 调度器列表
+schedulers:
+  # 高优先级调度器
+  - name: "high_priority_scheduler"    # 调度器唯一名称（必需）
+    enabled: true                       # 是否启用（可选，默认 true）
+    type: "rocketmq_delay_scheduler"    # 调度器类型（可选，默认 rocketmq_delay_scheduler）
+    config_file: "../conf/schedulers/high_priority_scheduler.yml"  # 调度器配置文件路径（必需）
+
+  # 低优先级调度器（延迟队列）
+  - name: "low_priority_scheduler"
+    enabled: true
+    type: "rocketmq_delay_scheduler"
+    config_file: "../conf/schedulers/low_priority_scheduler.yml"
+```
+
+**配置说明**：
+- `name`（必需）：调度器的唯一标识符
+  - 用于生成日志标识
+  - 用于生成 Redis 限流器的唯一 bucket_key
+  - 同一个主配置文件中不能有重复的名称
+- `enabled`（可选）：是否启用该调度器，默认为 `true`
+- `type`（可选）：调度器类型，默认为 `rocketmq_delay_scheduler`
+- `config_file`（必需）：调度器具体配置文件的路径（相对于可执行文件的路径）
+
+### 调度器配置文件
+
+调度器配置文件位置：`conf/schedulers/xxx.yml`
 
 ```yaml
 # 调度器工作线程数
@@ -170,33 +201,43 @@ rocketmq:
 # 时间窗口配置
 time_windows:
   # 使用本地限流器（显式指定类型）
-  - start: "00:30"                                  # 开始时间
+  - id: 1                                           # 时间窗口唯一 ID（必需）
+    start: "00:30"                                  # 开始时间
     end: "07:30"                                    # 结束时间
     rate_limiter_type: "local"                      # 限流器类型（可选，默认为 local）
     rate_limiter_config: '{"rate": 100}'            # 限流器配置（JSON 格式）
     enable: true                                    # 是否启用
 
   # 使用本地限流器（未指定类型，默认为 local）
-  - start: "13:00"
+  - id: 2
+    start: "13:00"
     end: "14:00"
     rate_limiter_config: '{"rate": 50, "burst": 100}'
     enable: true
 
-  # 使用 Redis 限流器
-  - start: "18:00"
+  # 使用 Redis 限流器（bucket_key 自动生成，无需手动指定）
+  - id: 3
+    start: "18:00"
     end: "20:00"
     rate_limiter_type: "redis"                      # 指定使用 Redis 限流器
-    rate_limiter_config: '{"bucket_key": "evening_window", "rate": 200, "burst": 300}'
+    rate_limiter_config: '{"rate": 200, "burst": 300}'  # 无需指定 bucket_key
     enable: true
 
   # 禁用的窗口
-  - start: "23:00"
+  - id: 4
+    start: "23:00"
     end: "23:59"
     rate_limiter_config: '{"rate": 200}'
     enable: false
 ```
 
 **配置说明**：
+- `id`（必需）：时间窗口的唯一标识符
+  - 支持整数或字符串类型
+  - 同一调度器内的窗口 ID 不能重复
+  - 用于生成 Redis 限流器的 bucket_key（格式：`{scheduler_name}:{window_id}`）
+- `start`（必需）：开始时间，格式为 `HH:MM`（24 小时制）
+- `end`（必需）：结束时间，格式为 `HH:MM`（24 小时制）
 - `rate_limiter_type`（可选）：限流器类型，可选值为 `local` 或 `redis`
   - 如果不指定，默认为 `local`（本地限流器）
   - `local`：使用本地内存限流器，适用于单机部署
@@ -204,6 +245,15 @@ time_windows:
 - `rate_limiter_config`（必需）：限流器的具体配置，JSON 格式字符串
   - 不同类型的限流器需要不同的配置参数（详见下方说明）
 - `enable`（必需）：是否启用该时间窗口
+
+**多调度器限流器 key 生成规则**：
+当使用 Redis 限流器时，系统会自动生成唯一的 `bucket_key`，格式为：`{scheduler_name}:{window_id}`
+
+例如：
+- 调度器 `high_priority_scheduler` 的窗口 `id: 1` → bucket_key: `high_priority_scheduler:1`
+- 调度器 `low_priority_scheduler` 的窗口 `id: 1` → bucket_key: `low_priority_scheduler:1`
+
+这样多个调度器可以使用相同的窗口 ID 而不会产生冲突。
 
 ### 限流器配置
 
@@ -233,27 +283,30 @@ time_windows:
 
 基于 Redis + Lua 脚本的分布式令牌桶实现，适用于多实例部署场景。
 
+**重要说明**：
+- 当使用 Redis 限流器时，**无需手动指定 `bucket_key`**
+- 系统会自动生成唯一的 `bucket_key`，格式为：`{scheduler_name}:{window_id}`
+- 这确保了多个调度器和多个时间窗口的限流器 key 不会冲突
+
+**最小配置**：
 ```json
 {
-  "bucket_key": "my_bucket",        // 令牌桶在 Redis 中的键名（必需）
   "rate": 100                       // 速率（每秒生成的令牌数，必需）
 }
 ```
 
-完整配置示例：
+**完整配置**：
 ```json
 {
-  "bucket_key": "my_bucket",        // 令牌桶在 Redis 中的键名（必需）
   "rate": 100,                      // 速率（每秒生成的令牌数，必需）
   "burst": 200,                     // 突发容量（可选，默认与 rate 相同）
   "script_path": "../conf/redis_rate_limiter.lua",  // Lua 脚本路径（可选）
-  "redis_address": "127.0.0.1:6379",// Redis 服务器地址（可选，可通过命令行参数指定）
+  "redis_address": "127.0.0.1:6379",// Redis 服务器地址（可选）
   "redis_password": "password"      // Redis 密码（可选）
 }
 ```
 
 **参数说明**：
-- `bucket_key`（必需）：令牌桶在 Redis 中的键名，每个不同的时间窗口应使用不同的键名
 - `rate`（必需）：每秒生成的令牌数量，必须大于 0
 - `burst`（可选）：令牌桶的最大容量，如果未设置，默认值为 `rate`
 - `script_path`（可选）：Lua 脚本文件路径，默认为 `../conf/redis_rate_limiter.lua`
@@ -272,8 +325,10 @@ time_windows:
 ### 时间窗口规则
 
 - 时间格式：`HH:MM`（24 小时制）
+- 时间窗口 `id` 是必需的，用于标识和生成唯一限流器 key
 - 不允许跨天配置（如 23:00-01:00）
 - 不允许时间窗口重叠
+- 同一调度器内的窗口 ID 不能重复
 - 每个时间窗口可以独立启用或禁用
 
 ## 使用方法
@@ -285,14 +340,55 @@ cd build
 ./bufferbridge-mq
 ```
 
+启动时会：
+1. 加载主配置文件 `conf/conf.yml`
+2. 加载所有启用的调度器配置
+3. 初始化各调度器的 RocketMQ 连接和限流器
+4. 启动所有调度器的工作线程
+5. 开始消息调度处理
+
 ### 停止服务
 
 在运行界面按 `Enter` 键，程序会优雅停机：
 
-1. 停止消费新消息
-2. 等待已消费消息处理完成
-3. 关闭连接和线程池
-4. 退出程序
+1. 停止所有调度器
+2. 停止消费新消息
+3. 等待已消费消息处理完成
+4. 关闭连接和线程池
+5. 退出程序
+
+### 多调度器示例
+
+**场景**：同时运行高优先级和低优先级两个调度器
+
+1. **高优先级调度器**（`conf/schedulers/high_priority_scheduler.yml`）
+   - 处理紧急消息
+   - 全天候运行
+   - 高速率（1000 msg/s）
+   - 使用本地限流器
+
+2. **低优先级调度器**（`conf/schedulers/low_priority_scheduler.yml`）
+   - 处理非紧急消息
+   - 仅在夜间和午间处理
+   - 低速率（50-200 msg/s）
+   - 使用 Redis 分布式限流器
+
+**配置**（`conf/conf.yml`）：
+```yaml
+schedulers:
+  - name: "high_priority_scheduler"
+    enabled: true
+    config_file: "../conf/schedulers/high_priority_scheduler.yml"
+
+  - name: "low_priority_scheduler"
+    enabled: true
+    config_file: "../conf/schedulers/low_priority_scheduler.yml"
+```
+
+**Redis 限流器 key 自动生成**：
+- `high_priority_scheduler` 的窗口 `id: 1` → Redis key: `high_priority_scheduler:1`
+- `low_priority_scheduler` 的窗口 `id: 1` → Redis key: `low_priority_scheduler:1`
+- 两个调度器可以使用相同的窗口 ID 而不会冲突
 
 ### 日志说明
 
@@ -330,16 +426,18 @@ bufferbridge-mq/
 ├── CMakeLists.txt              # CMake 构建配置
 ├── main.cpp                    # 程序入口
 ├── conf/                       # 配置文件目录
-│   ├── conf.yml                # 主配置
+│   ├── conf.yml                # 主配置文件（定义多个调度器）
 │   ├── redis_rate_limiter.lua  # Redis 限流脚本
-│   └── schedulers/             # 调度器配置
-│       └── rocketmq_delay_scheduler.yml
+│   └── schedulers/             # 调度器配置目录
+│       ├── high_priority_scheduler.yml    # 高优先级调度器配置
+│       └── low_priority_scheduler.yml     # 低优先级调度器配置
 ├── src/                        # 源代码目录
 │   ├── global.h/cpp            # 全局注册和初始化
 │   ├── iratelimiter.h          # 限流器接口
 │   ├── local_ratelimiter.h/cpp # 本地限流器实现
 │   ├── redis_ratelimiter.h/cpp # Redis 限流器实现
 │   ├── ischeduler.h            # 调度器接口
+│   ├── scheduler_manager.h/cpp # 调度器管理器
 │   └── rocketmq_delay_scheduler.h/cpp  # RocketMQ 延时调度器
 └── third-party/                # 第三方库
     ├── hot-loader/             # 热加载库
@@ -350,6 +448,13 @@ bufferbridge-mq/
 
 ## 核心组件说明
 
+### SchedulerManager
+调度器管理器，负责管理多个调度器实例：
+- 从主配置文件加载多个调度器
+- 启动和停止所有调度器
+- 管理调度器生命周期
+- 检查调度器名称唯一性
+
 ### RocketMQDelayScheduler
 主要的调度器实现，负责：
 - 从缓冲主题消费消息
@@ -357,6 +462,7 @@ bufferbridge-mq/
 - 应用限流策略
 - 向目标主题生产消息
 - 消息确认和异常处理
+- 支持配置热加载
 
 ### IRateLimiter 接口
 限流器抽象接口，定义了限流器的统一规范。所有限流器实现必须继承此接口。
@@ -400,8 +506,9 @@ public:
     virtual ~IScheduler() noexcept = default;
 
     // 初始化调度器
+    // name: 调度器名称（用于生成日志和限流器 key）
     // config: 配置文件的路径
-    virtual bool init(const std::string& config) = 0;
+    virtual bool init(const std::string& name, const std::string& config) = 0;
 
     // 启动调度器
     virtual void start() = 0;

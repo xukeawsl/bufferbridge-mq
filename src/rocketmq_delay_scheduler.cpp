@@ -1,6 +1,9 @@
 #include "rocketmq_delay_scheduler.h"
 
+#include <set>
+
 #include "global.h"
+#include "nlohmann/json.hpp"
 #include "yaml-cpp/yaml.h"
 
 static short get_current_time() {
@@ -59,8 +62,10 @@ RocketMQDelayScheduler::RocketMQDelayScheduler() : _running(false) {}
 
 RocketMQDelayScheduler::~RocketMQDelayScheduler() { stop(); }
 
-bool RocketMQDelayScheduler::init(const std::string& config) {
-    // 保存配置文件路径用于热加载
+bool RocketMQDelayScheduler::init(const std::string& name,
+                                  const std::string& config) {
+    // 保存调度器名称和配置文件路径
+    _name = name;
     _config_file = config;
 
     try {
@@ -191,10 +196,10 @@ bool RocketMQDelayScheduler::init(const std::string& config) {
                 .withAwaitDuration(
                     std::chrono::seconds(cfg.buffer_consumer_await_duration))
                 .build();
-        
+
         cfg.buffer_mq_consumer =
             std::make_shared<rocketmq::SimpleConsumer>(std::move(consumer));
-        
+
         auto producer =
             rocketmq::Producer::newBuilder()
                 .withConfiguration(
@@ -204,14 +209,43 @@ bool RocketMQDelayScheduler::init(const std::string& config) {
                         .build())
                 .withTopics({cfg.target_producer_topic})
                 .build();
-        
+
         cfg.target_mq_producer =
             std::make_shared<rocketmq::Producer>(std::move(producer));
-        
+
         YAML::Node time_windows_node = config_node["time_windows"];
+
+        // 用于检查时间窗口 id 重复
+        std::set<std::string> window_ids;
 
         for (const auto& time_window_node : time_windows_node) {
             RocketMQDelaySchedulerConfig::TimeWindow window;
+
+            // 读取时间窗口 id（必需）
+            if (!time_window_node["id"].IsDefined()) {
+                SPDLOG_ERROR("Time window 'id' is required");
+                return false;
+            }
+
+            // 支持 int 和 string 两种类型
+            if (time_window_node["id"].Type() == YAML::NodeType::Scalar) {
+                try {
+                    window.id =
+                        std::to_string(time_window_node["id"].as<int>());
+                } catch (...) {
+                    window.id = time_window_node["id"].as<std::string>();
+                }
+            } else {
+                window.id = time_window_node["id"].as<std::string>();
+            }
+
+            // 检查时间窗口 id 是否重复
+            if (window_ids.find(window.id) != window_ids.end()) {
+                SPDLOG_ERROR("Duplicate time window id '{}'", window.id);
+                return false;
+            }
+            window_ids.insert(window.id);
+
             std::string start_str = time_window_node["start"].as<std::string>();
             std::string end_str = time_window_node["end"].as<std::string>();
             window.start = time_str_to_short(start_str);
@@ -228,6 +262,24 @@ bool RocketMQDelayScheduler::init(const std::string& config) {
                         time_window_node["rate_limiter_type"].as<std::string>();
                 }
 
+                // 如果是 Redis 限流器，自动设置 bucket_key 为
+                // scheduler_name:window_id
+                if (rate_limiter_type == "redis") {
+                    try {
+                        auto json_config =
+                            nlohmann::json::parse(rate_limiter_config);
+                        std::string bucket_key = _name + ":" + window.id;
+                        json_config["bucket_key"] = bucket_key;
+                        rate_limiter_config = json_config.dump();
+                    } catch (const std::exception& e) {
+                        SPDLOG_ERROR(
+                            "Failed to set bucket_key for Redis rate limiter: "
+                            "{}",
+                            e.what());
+                        return false;
+                    }
+                }
+
                 const IRateLimiter* rate_limiter_ext =
                     RateLimiterExtension()->Find(rate_limiter_type.c_str());
                 if (rate_limiter_ext) {
@@ -236,7 +288,8 @@ bool RocketMQDelayScheduler::init(const std::string& config) {
                         window.rate_limiter = rate_limiter;
                     } else {
                         SPDLOG_ERROR(
-                            "Failed to initialize rate limiter '{}' for time window "
+                            "Failed to initialize rate limiter '{}' for time "
+                            "window "
                             "[{} - {}]",
                             rate_limiter_type, start_str, end_str);
                         return false;
@@ -255,7 +308,7 @@ bool RocketMQDelayScheduler::init(const std::string& config) {
         }
 
         validate_time_windows(cfg.time_windows);
-        
+
         _cfg.Modify(modify, cfg);
     } catch (const std::exception& e) {
         SPDLOG_ERROR("Failed to initialize RocketMQDelayScheduler: {}",
@@ -313,7 +366,8 @@ void RocketMQDelayScheduler::worker_thread_func() {
         RocketMQDelaySchedulerConfig local_cfg;
 
         {
-            butil::DoublyBufferedData<RocketMQDelaySchedulerConfig>::ScopedPtr cfg_ptr;
+            butil::DoublyBufferedData<RocketMQDelaySchedulerConfig>::ScopedPtr
+                cfg_ptr;
             if (_cfg.Read(&cfg_ptr)) {
                 SPDLOG_ERROR(
                     "Failed to read configuration for RocketMQDelayScheduler");
@@ -323,7 +377,7 @@ void RocketMQDelayScheduler::worker_thread_func() {
 
             // 立即复制配置到本地，最小化持有读锁的时间
             local_cfg = *cfg_ptr;
-        }  // ScopedPtr 在这里析构，立即释放读锁
+        }    // ScopedPtr 在这里析构，立即释放读锁
 
         short current_time = get_current_time();
 
@@ -383,7 +437,7 @@ void RocketMQDelayScheduler::worker_thread_func() {
             std::error_code send_ec;
             rocketmq::SendReceipt send_receipt =
                 local_cfg.target_mq_producer->send(std::move(new_message),
-                                                  send_ec);
+                                                   send_ec);
 
             if (send_ec) {
                 SPDLOG_ERROR("Failed to send message to target MQ: {}",
@@ -418,7 +472,7 @@ void RocketMQDelayScheduler::reload_config() {
 
     // 复用 init 方法重新加载配置
     // 由于 init 使用 _cfg.Modify() 更新配置，是线程安全的
-    if (init(_config_file)) {
+    if (init(_name, _config_file)) {
         SPDLOG_INFO("Configuration reloaded successfully");
     } else {
         SPDLOG_INFO("Failed to reload configuration");
@@ -437,12 +491,12 @@ void RocketMQDelayScheduler::enable_hot_reload() {
     }
 
     // 创建热加载任务
-    _hot_load_task = std::make_unique<RocketMQDelaySchedulerHotLoadTask>(
-        this, _config_file);
+    _hot_load_task =
+        std::make_unique<RocketMQDelaySchedulerHotLoadTask>(this, _config_file);
 
     // 注册到 HotLoader
     if (HotLoader::instance().register_task(_hot_load_task.get(),
-                                             HotLoader::DOESNT_OWN_TASK) != 0) {
+                                            HotLoader::DOESNT_OWN_TASK) != 0) {
         SPDLOG_ERROR("Failed to register hot load task");
         _hot_load_task.reset();
         return;

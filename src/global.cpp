@@ -4,10 +4,13 @@
 #include "redis_ratelimiter.h"
 #include "rocketmq_delay_scheduler.h"
 
-DEFINE_string(rocketmq_log_path, "./logs/rocketmq.log", "RocketMQ log file path");
-DEFINE_uint64(rocketmq_log_file_size, 50 * 1024 * 1024, "RocketMQ log file size in bytes");
+DEFINE_string(rocketmq_log_path, "./logs/rocketmq.log",
+              "RocketMQ log file path");
+DEFINE_uint64(rocketmq_log_file_size, 50 * 1024 * 1024,
+              "RocketMQ log file size in bytes");
 DEFINE_uint64(rocketmq_log_file_count, 5, "RocketMQ log file count");
-DEFINE_string(log_file, "./logs/bufferbridge.log", "BufferBridge log file path");
+DEFINE_string(log_file, "./logs/bufferbridge.log",
+              "BufferBridge log file path");
 DEFINE_uint64(log_rotate_size, 10 * 1024 * 1024, "Log rotate size in bytes");
 DEFINE_uint32(log_rotate_count, 5, "Log rotate file count");
 DEFINE_uint32(log_thread_pool_q_size, 8192, "Log thread pool queue size");
@@ -96,7 +99,7 @@ bool init_bufferbridge_logger() {
         }
 
         spdlog::set_pattern("[%Y-%m-%d %T.%f] [%^%l%$] [%s:%#] [thread %t] %v");
-    } catch (const std::exception &e) {
+    } catch (const std::exception& e) {
         spdlog::error("Failed to initialize logger: {}", e.what());
         return false;
     }
@@ -135,6 +138,4 @@ bool global_init() {
     return true;
 }
 
-void global_destroy() {
-    HotLoader::instance().stop();
-}
+void global_destroy() { HotLoader::instance().stop(); }
