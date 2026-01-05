@@ -6,6 +6,8 @@
 #include "nlohmann/json.hpp"
 #include "yaml-cpp/yaml.h"
 
+namespace bmq {
+
 static short get_current_time() {
     auto now = std::chrono::system_clock::now();
     std::time_t now_c = std::chrono::system_clock::to_time_t(now);
@@ -29,10 +31,10 @@ static short time_str_to_short(const std::string& time_str) {
 }
 
 static void validate_time_windows(
-    std::vector<RocketMQDelaySchedulerConfig::TimeWindow>& time_windows) {
+    std::vector<bmq::RocketMQDelaySchedulerConfig::TimeWindow>& time_windows) {
     std::sort(time_windows.begin(), time_windows.end(),
-              [](const RocketMQDelaySchedulerConfig::TimeWindow& a,
-                 const RocketMQDelaySchedulerConfig::TimeWindow& b) {
+              [](const bmq::RocketMQDelaySchedulerConfig::TimeWindow& a,
+                 const bmq::RocketMQDelaySchedulerConfig::TimeWindow& b) {
                   return a.start < b.start;
               });
 
@@ -504,3 +506,4 @@ void RocketMQDelayScheduler::enable_hot_reload() {
 
     SPDLOG_INFO("Hot reload enabled for config file: {}", _config_file);
 }
+}    // namespace bmq

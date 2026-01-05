@@ -6,6 +6,8 @@
 
 #include "ischeduler.h"
 
+namespace bmq {
+
 class SchedulerManager {
 public:
     SchedulerManager() = default;
@@ -26,9 +28,11 @@ public:
 private:
     struct SchedulerInstance {
         std::string name;
-        std::shared_ptr<IScheduler> scheduler;
+        std::shared_ptr<bmq::IScheduler> scheduler;
         std::string config_file;
     };
 
     std::vector<SchedulerInstance> _schedulers;
 };
+
+}    // namespace bmq

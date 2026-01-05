@@ -6,6 +6,8 @@
 #include "spdlog/spdlog.h"
 #include "yaml-cpp/yaml.h"
 
+namespace bmq {
+
 SchedulerManager::~SchedulerManager() { stop_all(); }
 
 bool SchedulerManager::load_from_config(const std::string& config_file) {
@@ -141,3 +143,5 @@ void SchedulerManager::stop_all() {
 
     SPDLOG_INFO("All schedulers stopped");
 }
+
+}    // namespace bmq

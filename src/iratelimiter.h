@@ -6,6 +6,8 @@
 #include "brpc/extension.h"
 #include "spdlog/spdlog.h"
 
+namespace bmq {
+
 class IRateLimiter {
 public:
     virtual ~IRateLimiter() noexcept = default;
@@ -17,6 +19,8 @@ public:
     virtual std::shared_ptr<IRateLimiter> clone() const = 0;
 };
 
-inline brpc::Extension<const IRateLimiter>* RateLimiterExtension() {
-    return brpc::Extension<const IRateLimiter>::instance();
+}    // namespace bmq
+
+inline brpc::Extension<const bmq::IRateLimiter>* RateLimiterExtension() {
+    return brpc::Extension<const bmq::IRateLimiter>::instance();
 }

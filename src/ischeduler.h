@@ -5,6 +5,8 @@
 
 #include "brpc/extension.h"
 
+namespace bmq {
+
 class IScheduler {
 public:
     virtual ~IScheduler() noexcept = default;
@@ -18,6 +20,8 @@ public:
     virtual std::shared_ptr<IScheduler> clone() const = 0;
 };
 
-inline brpc::Extension<const IScheduler>* SchedulerExtension() {
-    return brpc::Extension<const IScheduler>::instance();
+}    // namespace bmq
+
+inline brpc::Extension<const bmq::IScheduler>* SchedulerExtension() {
+    return brpc::Extension<const bmq::IScheduler>::instance();
 }

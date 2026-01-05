@@ -5,7 +5,9 @@
 
 #include "iratelimiter.h"
 
-class LocalRateLimiter : public IRateLimiter {
+namespace bmq {
+
+class LocalRateLimiter : public bmq::IRateLimiter {
 public:
     LocalRateLimiter()
         : _initialized(false),
@@ -18,8 +20,8 @@ public:
 
     bool is_allowed() override;
 
-    std::shared_ptr<IRateLimiter> clone() const override {
-        return std::dynamic_pointer_cast<IRateLimiter>(
+    std::shared_ptr<bmq::IRateLimiter> clone() const override {
+        return std::dynamic_pointer_cast<bmq::IRateLimiter>(
             std::make_shared<LocalRateLimiter>());
     }
 
@@ -31,3 +33,5 @@ private:
     double _tokens;
     std::chrono::steady_clock::time_point _last_refill_time;
 };
+
+}    // namespace bmq

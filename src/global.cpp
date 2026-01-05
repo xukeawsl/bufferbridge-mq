@@ -16,6 +16,8 @@ DEFINE_uint32(log_rotate_count, 5, "Log rotate file count");
 DEFINE_uint32(log_thread_pool_q_size, 8192, "Log thread pool queue size");
 DEFINE_uint32(log_thread_pool_t_num, 1, "Log thread pool thread number");
 
+namespace bmq {
+
 struct GlobalExtensions {
     LocalRateLimiter local_rate_limiter;
     RedisRateLimiter redis_rate_limiter;
@@ -139,3 +141,5 @@ bool global_init() {
 }
 
 void global_destroy() { HotLoader::instance().stop(); }
+
+}    // namespace bmq

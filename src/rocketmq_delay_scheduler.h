@@ -13,6 +13,8 @@
 #include "rocketmq/Producer.h"
 #include "rocketmq/SimpleConsumer.h"
 
+namespace bmq {
+
 // 前置声明
 class RocketMQDelaySchedulerHotLoadTask;
 
@@ -37,14 +39,14 @@ struct RocketMQDelaySchedulerConfig {
         std::string id;    // 时间窗口唯一标识
         short start;       // "05:30" -> 530
         short end;         // "09:30" -> 930
-        std::shared_ptr<IRateLimiter> rate_limiter;
+        std::shared_ptr<bmq::IRateLimiter> rate_limiter;
         bool enable;
     };
 
     std::vector<TimeWindow> time_windows;
 };
 
-class RocketMQDelayScheduler : public IScheduler {
+class RocketMQDelayScheduler : public bmq::IScheduler {
 public:
     RocketMQDelayScheduler();
 
@@ -56,8 +58,8 @@ public:
 
     void stop() override;
 
-    std::shared_ptr<IScheduler> clone() const override {
-        return std::dynamic_pointer_cast<IScheduler>(
+    std::shared_ptr<bmq::IScheduler> clone() const override {
+        return std::dynamic_pointer_cast<bmq::IScheduler>(
             std::make_shared<RocketMQDelayScheduler>());
     }
 
@@ -88,7 +90,7 @@ private:
 // 热加载任务类
 class RocketMQDelaySchedulerHotLoadTask : public HotLoadTask {
 public:
-    RocketMQDelaySchedulerHotLoadTask(RocketMQDelayScheduler* scheduler,
+    RocketMQDelaySchedulerHotLoadTask(bmq::RocketMQDelayScheduler* scheduler,
                                       const std::string& file)
         : HotLoadTask(file), _scheduler(scheduler) {}
 
@@ -98,5 +100,7 @@ public:
     }
 
 private:
-    RocketMQDelayScheduler* _scheduler;
+    bmq::RocketMQDelayScheduler* _scheduler;
 };
+
+}    // namespace bmq

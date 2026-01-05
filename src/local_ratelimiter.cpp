@@ -2,6 +2,8 @@
 
 #include "nlohmann/json.hpp"
 
+namespace bmq {
+
 bool LocalRateLimiter::init(const std::string& config) {
     try {
         auto json_config = nlohmann::json::parse(config);
@@ -52,3 +54,5 @@ bool LocalRateLimiter::is_allowed() {
 
     return false;
 }
+
+}    // namespace bmq

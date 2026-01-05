@@ -16,6 +16,8 @@ DEFINE_int32(limiter_script_load_timeout_ms, 1000,
 DEFINE_int32(limiter_check_timeout_ms, 100,
              "Timeout in milliseconds for each is_allowed check");
 
+namespace bmq {
+
 bool RedisRateLimiter::init(const std::string& config) {
     try {
         auto json_config = nlohmann::json::parse(config);
@@ -216,3 +218,5 @@ bool RedisRateLimiter::is_allowed() {
 
     return true;
 }
+
+}    // namespace bmq

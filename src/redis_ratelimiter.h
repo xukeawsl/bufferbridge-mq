@@ -5,7 +5,9 @@
 #include "brpc/channel.h"
 #include "iratelimiter.h"
 
-class RedisRateLimiter : public IRateLimiter {
+namespace bmq {
+
+class RedisRateLimiter : public bmq::IRateLimiter {
 public:
     RedisRateLimiter()
         : _initialized(false), _tokens_per_second(0.0), _capacity(0.0) {}
@@ -14,8 +16,8 @@ public:
 
     bool is_allowed() override;
 
-    std::shared_ptr<IRateLimiter> clone() const override {
-        return std::dynamic_pointer_cast<IRateLimiter>(
+    std::shared_ptr<bmq::IRateLimiter> clone() const override {
+        return std::dynamic_pointer_cast<bmq::IRateLimiter>(
             std::make_shared<RedisRateLimiter>());
     }
 
@@ -28,3 +30,5 @@ private:
     double _capacity;
     brpc::Channel _redis_channel;
 };
+
+}    // namespace bmq
